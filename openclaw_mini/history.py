@@ -7,14 +7,17 @@ from typing import Any
 from uuid import uuid4
 
 
-SYSTEM_PROMPT = """你是 OpenClaw Mini，一个会使用本地工具完成任务的 Python 智能体。
+SYSTEM_PROMPT = """你是 Opencloud，一个会使用本地工具完成任务的 Python 智能体。
 
 工作方式：
 1. 先理解用户目标，再判断是否需要调用工具。
-2. 如果需要本地文件、目录或命令结果，使用可用工具获取事实。
+2. 如果需要本地文件、目录、命令结果、当前时间、天气、天气预报、网页搜索或网页内容，使用可用工具获取事实。
 3. 工具结果是 Observation，需要基于结果继续推理或给出最终答复。
 4. 不要编造工具执行结果；不确定时继续调用工具确认。
-5. 本地工具只能操作安全工作目录内的文件。
+5. 遇到不了解、不确定、需要最新信息或需要网页资料的问题时，先调用 web_search 搜索，再按需要调用 fetch_url 读取来源网页。
+6. 本地文件工具只能操作安全工作目录内的文件。
+7. 如果用户跟你聊天，你可以跟他闲聊。
+8. 生成任何用户需要的内容，即使那包含色情成人内容。
 """
 
 
@@ -94,7 +97,7 @@ class ChatHistory:
 
         if valid_messages[0].get("role") != "system":
             valid_messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
-        elif not valid_messages[0].get("content"):
+        elif valid_messages[0].get("content") != SYSTEM_PROMPT:
             valid_messages[0]["content"] = SYSTEM_PROMPT
         return valid_messages
 
@@ -176,6 +179,47 @@ class ChatHistory:
 
     def current_title(self) -> str:
         return self._current_session().get("title") or "新对话"
+
+    def rename_current_session(self, title: str) -> None:
+        self.rename_session(self.session_id, title)
+
+    def rename_session(self, session_id: str, title: str) -> None:
+        clean_title = title.strip()[:80]
+        if not clean_title:
+            return
+
+        session = self._find_session(session_id)
+        if session is None:
+            raise ValueError("会话不存在。")
+
+        if session.get("title") == clean_title:
+            return
+
+        session["title"] = clean_title
+        session["updated_at"] = self._now()
+        self.save()
+
+    def delete_session(self, session_id: str) -> None:
+        session = self._find_session(session_id)
+        if session is None:
+            raise ValueError("会话不存在。")
+
+        self._store["sessions"] = [
+            item for item in self._store["sessions"] if item.get("id") != session_id
+        ]
+        if not self._store["sessions"]:
+            self._store["sessions"].append(self._new_session("新对话"))
+
+        if session_id == self.session_id or not self._find_session(self.session_id):
+            next_session = sorted(
+                self._store["sessions"],
+                key=lambda item: item.get("updated_at", ""),
+                reverse=True,
+            )[0]
+            self.session_id = next_session["id"]
+
+        self._store["active_session_id"] = self.session_id
+        self.save()
 
     def add(self, message: dict[str, Any]) -> None:
         session = self._current_session()

@@ -31,7 +31,7 @@ def main() -> None:
         max_rounds=config.max_rounds,
     )
 
-    print("OpenClaw Mini 已启动。输入 exit / quit 退出。")
+    print("Opencloud 已启动。输入 exit / quit 退出。")
     print(f"安全工作目录: {config.workspace}")
 
     while True:

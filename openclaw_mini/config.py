@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +28,10 @@ class Config:
     history_path: Path
     max_rounds: int
     temperature: float
+    baidu_speech_api_key: str
+    baidu_speech_secret_key: str
+    baidu_speech_cuid: str
+    baidu_speech_dev_pid: int
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -47,4 +52,8 @@ class Config:
             history_path=history_path,
             max_rounds=int(os.getenv("OPENCLAW_MAX_ROUNDS", "8")),
             temperature=float(os.getenv("OPENCLAW_TEMPERATURE", "0.2")),
+            baidu_speech_api_key=os.getenv("BAIDU_SPEECH_API_KEY", "").strip(),
+            baidu_speech_secret_key=os.getenv("BAIDU_SPEECH_SECRET_KEY", "").strip(),
+            baidu_speech_cuid=os.getenv("BAIDU_SPEECH_CUID", f"opencloud-{uuid.getnode():012x}").strip(),
+            baidu_speech_dev_pid=int(os.getenv("BAIDU_SPEECH_DEV_PID", "1537")),
         )

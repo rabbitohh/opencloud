@@ -13,7 +13,7 @@ class DeepSeekClient:
     def __init__(
         self,
         api_key: str,
-        model: str = "deepseek-chat",
+        model: str = "deepseek-v4-flash",
         temperature: float = 0.2,
         base_url: str = "https://api.deepseek.com",
         timeout: int = 60,
