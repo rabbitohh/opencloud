@@ -4,6 +4,7 @@ from openclaw_mini.agent import MiniOpenClawAgent
 from openclaw_mini.config import Config
 from openclaw_mini.history import ChatHistory
 from openclaw_mini.llm import DeepSeekClient
+from openclaw_mini.memory import MemoryStore
 from openclaw_mini.tools.local import build_local_tool_registry
 
 
@@ -17,13 +18,14 @@ def main() -> None:
 
     config.workspace.mkdir(parents=True, exist_ok=True)
 
-    history = ChatHistory(config.history_path)
+    memory_store = MemoryStore(config.memory_path)
+    history = ChatHistory(config.history_path, memory_store=memory_store)
     client = DeepSeekClient(
         api_key=config.deepseek_api_key,
         model=config.model,
         temperature=config.temperature,
     )
-    tools = build_local_tool_registry(config.workspace)
+    tools = build_local_tool_registry(config.workspace, memory_store=memory_store)
     agent = MiniOpenClawAgent(
         client=client,
         tools=tools,

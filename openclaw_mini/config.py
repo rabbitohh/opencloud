@@ -26,6 +26,7 @@ class Config:
     model: str
     workspace: Path
     history_path: Path
+    memory_path: Path
     max_rounds: int
     temperature: float
     baidu_speech_api_key: str
@@ -44,12 +45,14 @@ class Config:
 
         workspace = Path(os.getenv("OPENCLAW_WORKSPACE", root / "workspace")).resolve()
         history_path = Path(os.getenv("OPENCLAW_HISTORY", root / "chat_history.json")).resolve()
+        memory_path = Path(os.getenv("OPENCLAW_MEMORY", root / "memory.json")).resolve()
 
         return cls(
             deepseek_api_key=api_key,
             model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip() or "deepseek-chat",
             workspace=workspace,
             history_path=history_path,
+            memory_path=memory_path,
             max_rounds=int(os.getenv("OPENCLAW_MAX_ROUNDS", "8")),
             temperature=float(os.getenv("OPENCLAW_TEMPERATURE", "0.2")),
             baidu_speech_api_key=os.getenv("BAIDU_SPEECH_API_KEY", "").strip(),

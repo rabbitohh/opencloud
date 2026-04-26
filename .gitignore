@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .env
 chat_history.json
+memory.json
 workspace/
 .venv/
 venv/

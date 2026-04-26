@@ -73,6 +73,7 @@ class MiniOpenClawAgent:
         messages = list(self.history.messages)
 
         for round_index in range(1, round_limit + 1):
+            messages = self.history.refresh_system_message(messages)
             self._emit_event(
                 on_event,
                 f"[Round {round_index}] Thought: 正在请求模型判断下一步...",

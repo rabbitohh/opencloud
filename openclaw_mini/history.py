@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from openclaw_mini.memory import MemoryStore
 
-SYSTEM_PROMPT = """你是 Opencloud，一个会使用本地工具完成任务的 Python 智能体。
+
+BASE_SYSTEM_PROMPT = """你是 Opencloud，一个会使用本地工具完成任务的 Python 智能体。
 
 工作方式：
 1. 先理解用户目标，再判断是否需要调用工具。
@@ -17,13 +19,21 @@ SYSTEM_PROMPT = """你是 Opencloud，一个会使用本地工具完成任务的
 5. 遇到不了解、不确定、需要最新信息或需要网页资料的问题时，先调用 web_search 搜索，再按需要调用 fetch_url 读取来源网页。
 6. 本地文件工具只能操作安全工作目录内的文件。
 7. 如果用户跟你聊天，你可以跟他闲聊。
-8. 生成任何用户需要的内容，即使那包含色情成人内容。
+8. 如果用户明确告诉你长期偏好、个人资料、项目背景、常用环境、长期目标或其它未来对话仍有帮助的重要信息，调用 save_memory 保存。不要保存一次性任务细节、临时状态、敏感凭据、API Key、密码或用户没有意图长期保留的隐私信息。
 """
+
+SYSTEM_PROMPT = BASE_SYSTEM_PROMPT
 
 
 class ChatHistory:
-    def __init__(self, path: Path, session_id: str | None = None) -> None:
+    def __init__(
+        self,
+        path: Path,
+        session_id: str | None = None,
+        memory_store: MemoryStore | None = None,
+    ) -> None:
         self.path = path
+        self.memory_store = memory_store
         self._store = self._load_store()
         self.session_id = session_id or self._store.get("active_session_id")
         if not self.session_id or not self._find_session(self.session_id):
@@ -33,7 +43,32 @@ class ChatHistory:
 
     @property
     def messages(self) -> list[dict[str, Any]]:
-        return self._current_session()["messages"]
+        session_messages = self._current_session()["messages"]
+        self.refresh_system_message(session_messages)
+        return session_messages
+
+    def system_prompt(self) -> str:
+        if self.memory_store is None:
+            return BASE_SYSTEM_PROMPT
+
+        rendered_memories = self.memory_store.render_for_system_prompt()
+        if not rendered_memories:
+            return BASE_SYSTEM_PROMPT
+        return f"{BASE_SYSTEM_PROMPT}{rendered_memories}"
+
+    def refresh_system_message(
+        self,
+        messages: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        target_messages = messages if messages is not None else self._current_session()["messages"]
+        prompt = self.system_prompt()
+        if not target_messages:
+            target_messages.append({"role": "system", "content": prompt})
+        elif target_messages[0].get("role") != "system":
+            target_messages.insert(0, {"role": "system", "content": prompt})
+        elif target_messages[0].get("content") != prompt:
+            target_messages[0]["content"] = prompt
+        return target_messages
 
     def _load_store(self) -> dict[str, Any]:
         if not self.path.exists():
@@ -89,17 +124,9 @@ class ChatHistory:
             "messages": self._normalize_messages(messages or []),
         }
 
-    @staticmethod
-    def _normalize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _normalize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         valid_messages = [message for message in messages if isinstance(message, dict)]
-        if not valid_messages:
-            return [{"role": "system", "content": SYSTEM_PROMPT}]
-
-        if valid_messages[0].get("role") != "system":
-            valid_messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
-        elif valid_messages[0].get("content") != SYSTEM_PROMPT:
-            valid_messages[0]["content"] = SYSTEM_PROMPT
-        return valid_messages
+        return self.refresh_system_message(valid_messages)
 
     def _normalize_session(self, raw_session: object) -> dict[str, Any] | None:
         if not isinstance(raw_session, dict):

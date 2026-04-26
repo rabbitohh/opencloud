@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from openclaw_mini.memory import MemoryStore
 from openclaw_mini.tools.base import ToolRegistry
 
 
@@ -397,7 +398,7 @@ def fetch_web_resource(url: str) -> dict[str, Any]:
     }
 
 
-def build_local_tool_registry(workspace: Path) -> ToolRegistry:
+def build_local_tool_registry(workspace: Path, memory_store: MemoryStore | None = None) -> ToolRegistry:
     registry = ToolRegistry()
     root = workspace.resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -407,6 +408,58 @@ def build_local_tool_registry(workspace: Path) -> ToolRegistry:
         if candidate != root and root not in candidate.parents:
             raise ValueError(f"路径越界，禁止访问安全目录外的文件: {path}")
         return candidate
+
+    @registry.register(
+        name="save_memory",
+        description=(
+            "保存对未来对话仍有帮助的长期记忆。仅用于用户明确表达的长期偏好、个人资料、"
+            "项目背景、常用环境或长期目标；不要保存密码、API Key、令牌或一次性任务细节。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "要长期记住的简洁事实，用第三人称或中性表述，不超过 1000 字符。",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "记忆类别，例如 preference、profile、project、environment、goal。",
+                },
+                "importance": {
+                    "type": "integer",
+                    "description": "重要性 1-5，默认 3。",
+                    "minimum": 1,
+                    "maximum": 5,
+                },
+                "source": {
+                    "type": "string",
+                    "description": "来源说明，默认 conversation。",
+                },
+            },
+            "required": ["content"],
+        },
+    )
+    def save_memory(
+        content: str,
+        category: str = "general",
+        importance: int = 3,
+        source: str = "conversation",
+    ) -> dict[str, Any]:
+        if memory_store is None:
+            return {"ok": False, "error": "未配置记忆存储。"}
+
+        memory = memory_store.add(
+            content,
+            category=category,
+            source=source,
+            importance=importance,
+        )
+        return {
+            "ok": True,
+            "memory": memory,
+            "path": str(memory_store.path),
+        }
 
     @registry.register(
         name="list_files",
