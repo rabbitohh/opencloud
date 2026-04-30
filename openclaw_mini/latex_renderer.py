@@ -13,7 +13,7 @@ from PySide6.QtGui import QTextDocumentFragment
 _PLACEHOLDER_PREFIX = "OPENCLAWLATEXPLACEHOLDER"
 _PLACEHOLDER_SUFFIX = "END"
 _LATEX_BASE_DPI = 72
-_LATEX_IMAGE_SCALE = 2
+_LATEX_IMAGE_SCALE = 10
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class RenderedLatex:
 
 
 class LatexMarkdownRenderer:
-    """Render Markdown containing $...$ and $$...$$ math to Qt-friendly HTML."""
+    """Render Markdown containing common LaTeX math delimiters to Qt-friendly HTML."""
 
     def __init__(self) -> None:
         self._cache: dict[tuple[str, bool, int, str, int], RenderedLatex | None] = {}
@@ -96,12 +96,12 @@ class LatexMarkdownRenderer:
                 output.append(text[index:])
                 break
 
-            start, end, delimiter_size, display = latex_range
+            start, end, opening_delimiter, closing_delimiter, display = latex_range
 
-            expression = text[start + delimiter_size : end].strip()
+            expression = text[start + len(opening_delimiter) : end].strip()
             if not expression:
-                output.append(text[index : end + delimiter_size])
-                index = end + delimiter_size
+                output.append(text[index : end + len(closing_delimiter)])
+                index = end + len(closing_delimiter)
                 continue
 
             output.append(text[index:start])
@@ -111,20 +111,31 @@ class LatexMarkdownRenderer:
             rendered[placeholder] = (
                 self._latex_html(
                     expression,
+                    opening_delimiter=opening_delimiter,
+                    closing_delimiter=closing_delimiter,
                     display=display,
                     font_size=font_size,
                     text_color=text_color,
                 ),
                 display,
             )
-            index = end + delimiter_size
+            index = end + len(closing_delimiter)
 
         return "".join(output), rendered, counter
 
-    def _latex_html(self, expression: str, *, display: bool, font_size: int, text_color: str) -> str:
+    def _latex_html(
+        self,
+        expression: str,
+        *,
+        opening_delimiter: str,
+        closing_delimiter: str,
+        display: bool,
+        font_size: int,
+        text_color: str,
+    ) -> str:
         rendered = self._render_latex(expression, display=display, font_size=font_size, text_color=text_color)
         if rendered is None:
-            fallback = f"$${expression}$$" if display else f"${expression}$"
+            fallback = f"{opening_delimiter}{expression}{closing_delimiter}"
             return html.escape(fallback)
         return rendered.html
 
@@ -166,15 +177,18 @@ class LatexMarkdownRenderer:
 def _math_to_png(expression: str, *, font_size: int, text_color: str, scale: int = 3) -> tuple[bytes, int, int]:
     import matplotlib as mpl
     from matplotlib.figure import Figure
+    from matplotlib.mathtext import MathTextParser
 
     scale = max(1, scale)
     dpi = _LATEX_BASE_DPI * scale
-    with mpl.rc_context({"mathtext.fontset": "cm"}):
+    math_expression = f"${expression}$"
+    with mpl.rc_context({"mathtext.fontset": "cm", "text.parse_math": True}):
+        MathTextParser("agg").parse(math_expression, dpi=dpi)
         fig = Figure(figsize=(0.01, 0.01), dpi=dpi)
         fig.patch.set_alpha(0)
         ax = fig.add_axes([0, 0, 1, 1])
         ax.axis("off")
-        ax.text(0, 0, f"${expression}$", color=text_color, fontsize=font_size)
+        ax.text(0, 0, math_expression, color=text_color, fontsize=font_size, parse_math=True)
         buffer = io.BytesIO()
         fig.savefig(
             buffer,
@@ -225,7 +239,7 @@ def _split_inline_code(text: str) -> list[tuple[str, bool]]:
     return segments
 
 
-def _find_inline_latex_end(text: str, start: int) -> int:
+def _find_inline_dollar_latex_end(text: str, start: int) -> int:
     index = start
     while index < len(text):
         if text[index] == "\\":
@@ -240,28 +254,125 @@ def _find_inline_latex_end(text: str, start: int) -> int:
     return -1
 
 
-def _find_latex_range(text: str, index: int) -> tuple[int, int, int, bool] | None:
+def _find_closing_delimiter(text: str, start: int, closing_delimiter: str) -> int:
+    index = start
     while index < len(text):
-        block_start = text.find("$$", index)
-        inline_start = text.find("$", index)
-        if block_start == -1 and inline_start == -1:
+        if text[index] == "\\":
+            if text.startswith(closing_delimiter, index):
+                return index
+            index += 2
+            continue
+        if text.startswith(closing_delimiter, index):
+            return index
+        index += 1
+    return -1
+
+
+def _find_opening_delimiter(text: str, index: int, opening_delimiter: str) -> int:
+    start = text.find(opening_delimiter, index)
+    while start != -1:
+        if opening_delimiter not in "([" or _is_plain_latex_opening(text, start, opening_delimiter):
+            return start
+        start = text.find(opening_delimiter, start + 1)
+    return -1
+
+
+def _is_plain_latex_opening(text: str, start: int, opening_delimiter: str) -> bool:
+    if start > 0 and text[start - 1] == "\\":
+        return False
+
+    content_start = start + len(opening_delimiter)
+    if content_start >= len(text):
+        return False
+
+    next_char = text[content_start]
+    if opening_delimiter == "(":
+        if next_char not in " \t\r\n\\":
+            return False
+    elif next_char not in " \t\r\n\\":
+        return False
+
+    if start > 0 and (text[start - 1].isalnum() or text[start - 1] == "_"):
+        return False
+
+    return True
+
+
+def _skip_latex_escape_or_spacing_group(text: str, index: int, opening: str, closing: str) -> int:
+    slash_end = index
+    while slash_end < len(text) and text[slash_end] == "\\":
+        slash_end += 1
+
+    if slash_end < len(text) and text[slash_end] == opening:
+        group_end = text.find(closing, slash_end + 1)
+        if group_end != -1:
+            return group_end + 1
+        return slash_end + 1
+
+    return min(len(text), index + 2)
+
+
+def _find_balanced_latex_end(text: str, start: int, opening: str, closing: str) -> int:
+    index = start + 1
+    depth = 1
+    while index < len(text):
+        if text[index] == "\\":
+            index = _skip_latex_escape_or_spacing_group(text, index, opening, closing)
+            continue
+        if text[index] == opening:
+            depth += 1
+        elif text[index] == closing:
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return -1
+
+
+def _looks_like_plain_delimited_latex(expression: str) -> bool:
+    if re.search(r"[\u3400-\u9fff]", expression):
+        return False
+    if re.search(r"[\\_^=+\-*/{}]", expression):
+        return True
+    if re.fullmatch(r"[A-Za-z0-9(),.\s]+", expression):
+        letters = re.sub(r"[^A-Za-z]", "", expression)
+        return len(letters) <= 3 or any(char.isdigit() for char in expression)
+    return False
+
+
+def _find_latex_range(text: str, index: int) -> tuple[int, int, str, str, bool] | None:
+    delimiters = (
+        ("$$", "$$", True),
+        (r"\[", r"\]", True),
+        (r"\(", r"\)", False),
+        ("$", "$", False),
+    )
+
+    while index < len(text):
+        candidates = [
+            (start, opening_delimiter, closing_delimiter, display)
+            for opening_delimiter, closing_delimiter, display in delimiters
+            if (start := _find_opening_delimiter(text, index, opening_delimiter)) != -1
+        ]
+        if not candidates:
             return None
 
-        if block_start != -1 and (inline_start == -1 or block_start <= inline_start):
-            start = block_start
-            end = text.find("$$", start + 2)
-            delimiter_size = 2
-            display = True
+        start, opening_delimiter, closing_delimiter, display = min(candidates, key=lambda item: item[0])
+        content_start = start + len(opening_delimiter)
+        if opening_delimiter == "$":
+            end = _find_inline_dollar_latex_end(text, content_start)
+        elif opening_delimiter in "([":
+            end = _find_balanced_latex_end(text, start, opening_delimiter, closing_delimiter)
         else:
-            start = inline_start
-            end = _find_inline_latex_end(text, start + 1)
-            delimiter_size = 1
-            display = False
+            end = _find_closing_delimiter(text, content_start, closing_delimiter)
 
         if end == -1:
             return None
-        if text[start + delimiter_size : end].strip():
-            return start, end, delimiter_size, display
-        index = end + delimiter_size
+        expression = text[content_start:end].strip()
+        if expression and (
+            opening_delimiter not in "([" or _looks_like_plain_delimited_latex(expression)
+        ):
+            return start, end, opening_delimiter, closing_delimiter, display
+        index = end + len(closing_delimiter)
 
     return None

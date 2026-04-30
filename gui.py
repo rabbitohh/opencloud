@@ -12,6 +12,7 @@ from openclaw_mini.agent import MiniOpenClawAgent
 from openclaw_mini.config import Config
 from openclaw_mini.history import ChatHistory
 from openclaw_mini.latex_renderer import LatexMarkdownRenderer
+from openclaw_mini.latex_sanitizer import sanitize_latex_content
 from openclaw_mini.llm import DeepSeekClient
 from openclaw_mini.memory import MemoryStore
 from openclaw_mini.speech import BaiduSpeechRecognizer
@@ -1998,8 +1999,14 @@ class OpenClawWindow(QMainWindow):
                     self.current_answer_has_delta = True
                     if self.transient_items and self.transient_items[-1]["role"] == "assistant":
                         self.transient_items[-1]["content"] += payload
+                        self.transient_items[-1]["content"] = sanitize_latex_content(
+                            self.transient_items[-1]["content"]
+                        )
                     else:
-                        self.transient_items.append({"role": "assistant", "content": payload})
+                        self.transient_items.append({
+                            "role": "assistant",
+                            "content": sanitize_latex_content(payload),
+                        })
                     dirty = True
                 elif kind == "event":
                     self.status_label.setText(payload)

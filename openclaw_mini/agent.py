@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from openclaw_mini.history import ChatHistory
+from openclaw_mini.latex_sanitizer import sanitize_latex_content
 from openclaw_mini.llm import DeepSeekClient
 from openclaw_mini.tools.base import ToolRegistry
 
@@ -86,6 +87,7 @@ class MiniOpenClawAgent:
                     self.tools.to_openai_tools(),
                     on_delta=on_delta,
                 )
+            self._sanitize_assistant_message(assistant_message)
             messages.append(assistant_message)
             self.history.add(assistant_message)
 
@@ -123,6 +125,12 @@ class MiniOpenClawAgent:
         final_message = MAX_ROUNDS_STOP_MESSAGE
         self.history.add({"role": "assistant", "content": final_message})
         return final_message
+
+    @staticmethod
+    def _sanitize_assistant_message(message: dict[str, Any]) -> None:
+        content = message.get("content")
+        if isinstance(content, str):
+            message["content"] = sanitize_latex_content(content)
 
     @staticmethod
     def _emit_event(on_event: Callable[[str], None] | None, message: str) -> None:

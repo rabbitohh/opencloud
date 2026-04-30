@@ -269,9 +269,15 @@ memory.json                        # 默认长期记忆文件
 - 中间显示聊天消息、工具事件和错误信息。
 - 输入框支持 `Ctrl+Enter` 发送。
 - 达到最大工具调用轮数后，可点击“继续”授权额外轮数。
-- 支持 Markdown 渲染；`latex_renderer.py` 会把 `$...$` 和 `$$...$$` 公式用 matplotlib mathtext 渲染成 PNG，再嵌入 Qt HTML。
+- 支持 Markdown 渲染；`latex_renderer.py` 会把 `$...$`、`(...)`、`\(...\)`、`$$...$$`、`[...]` 和 `\[...\]` 公式用 matplotlib mathtext 渲染成 PNG，再嵌入 Qt HTML。
 - 配置百度语音后，可点击麦克风按钮录音并转文字。
 - 如果系统支持 Qt TextToSpeech，可朗读助手回复。
+
+技术实现上，GUI 主要由 PySide6 的 `QMainWindow`、布局组件和自定义样式组成，聊天流式输出、工具调用事件、语音识别结果等异步事件会通过后台线程写入事件队列，再由 Qt 定时器在主线程中刷新界面，避免网络请求或模型推理阻塞窗口响应。消息正文使用 Qt HTML 显示，Markdown 先转换为 HTML，LaTeX 公式再交给 `openclaw_mini/latex_renderer.py` 渲染成可嵌入的图片资源。
+
+语音读入由 `gui.py` 中的录音逻辑和 `openclaw_mini/speech.py` 配合完成：点击麦克风按钮后，GUI 使用 QtMultimedia 的 `QAudioSource` 从默认麦克风采集 `16kHz`、`16bit`、单声道 PCM 音频；停止录音后在后台线程调用 `BaiduSpeechRecognizer.recognize_pcm()`，该客户端先用百度 API Key 和 Secret Key 换取 `access_token`，再把 PCM 音频 Base64 编码后发送到百度短语音识别接口。识别出的文字不会立即发送，而是先填入输入框，方便用户修改确认。
+
+朗读功能基于 PySide6 的 `QtTextToSpeech`。GUI 启动时会检测系统是否可用 `QTextToSpeech`，可用时显示全局朗读开关，并在助手消息旁提供单条消息朗读按钮。朗读前会把 Markdown、公式标记和多余空白清理成更适合播报的纯文本；如果正在朗读另一条消息，会先停止当前播报再切换到新的内容。
 
 ## 语音识别
 
